@@ -1,0 +1,8 @@
+#Query Each Sqlite Database
+
+#Convert to Json (Flatten FKs)
+
+#Parse Json
+
+#Insert into target database using correct library (Start with Postgres and MySQL)
+
