@@ -1,6 +1,8 @@
 #Postgres
 import psycopg2
 import json
+import sqlite3
+import logging
 try:
     import psycopg2
 except ImportError:
