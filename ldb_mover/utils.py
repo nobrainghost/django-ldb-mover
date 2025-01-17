@@ -84,36 +84,76 @@ def import_json_to_target(target_conn, target_type, import_path):
     cursor = target_conn.cursor()
 
     try:
-        for table, rows in data_structure.items():
+        # Iterate through tables and data in the JSON file
+        for table, rows in data_structure.get("data", {}).items():
             logging.info(f"Importing into table: {table}")
 
             if not rows:
                 continue
 
-            # Fetch column names by querying the target database schema
-            cursor.execute(f"PRAGMA table_info({table});" if target_type == "sqlite" else f"SELECT column_name FROM information_schema.columns WHERE table_name='{table}';")
-            columns = [info[1] for info in cursor.fetchall()]
+            # Fetch column names from schema
+            if table in data_structure.get("schema", {}):
+                columns = [column["name"] for column in data_structure["schema"][table]]
+            else:
+                if target_type == "sqlite":
+                    cursor.execute(f"PRAGMA table_info({table});")
+                    columns = [info[1] for info in cursor.fetchall()]
+                elif target_type == "postgres" or target_type == "mysql":
+                    cursor.execute(f"SELECT column_name FROM information_schema.columns WHERE table_name='{table}' AND table_schema='public';")
+                    columns = [info[0] for info in cursor.fetchall()]
+                else:
+                    raise ValueError(f"Unsupported database type: {target_type}")
+
+            # Create table if it doesn't exist
+            if target_type == "postgres":
+                # Create table query based on the schema
+                create_table_sql = f"CREATE TABLE IF NOT EXISTS {table} ("
+                column_defs = [f"{col} TEXT" for col in columns]  # Default to TEXT for all columns (can be improved for types)
+                create_table_sql += ", ".join(column_defs) + ");"
+                cursor.execute(create_table_sql)
+                logging.info(f"Table created: {table}")
 
             # Construct column and placeholder strings
             col_string = ",".join(columns)
             placeholders = ",".join(["%s"] * len(columns)) if target_type in ["postgres", "mysql"] else ",".join(["?"] * len(columns))
 
+            # Prepare the SQL query
             sql = f"INSERT INTO {table} ({col_string}) VALUES ({placeholders})"
+
+            # Insert rows into the table
             for row in rows:
+                if len(row) != len(columns):
+                    logging.warning(f"Skipping row with incorrect number of columns: {row}")
+                    continue
                 cursor.execute(sql, row)
 
+        # Commit the changes
+        logging.info("Committing changes to the database.")
         target_conn.commit()
+        logging.info("Data import completed successfully.")
 
     except Exception as e:
-        # Roll in case of an error and raise the exception
         target_conn.rollback()
-        logging.error(f"Error importing data into table {table}: {e}")
+        logging.error(f"Error importing data into table: {e}")
         raise
+    finally:
+        cursor.close()
+        logging.info("Database connection closed.")
+
+def check_data_transfer(target_conn, table_name):
+    
+    try:
+        cursor = target_conn.cursor()
+
+        cursor.execute(f"SELECT COUNT(*) FROM {table_name};")
+        row_count = cursor.fetchone()[0]
+
+        logging.info(f"Data transfer check for table '{table_name}': {row_count} rows found.")
+
+        return row_count
+
+    except Exception as e:
+        logging.error(f"Error checking data in table '{table_name}': {e}")
 
     finally:
         cursor.close()
-
-
-
-
-
